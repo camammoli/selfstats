@@ -50,11 +50,13 @@ $days    = max(7, min(365, (int)($_GET['days'] ?? 30)));
 $section = $_GET['s'] ?? 'overview';
 
 // Datos
-$gh_totals  = ss_get_github_totals($days);
-$gh_repos   = ss_get_github_repos();
-$sources    = ss_get_sources();
-$metrics    = ss_get_latest_metrics();
-$last_col   = ss_last_collection();
+$gh_totals      = ss_get_github_totals($days);
+$gh_repos       = ss_get_github_repos();
+$sources        = ss_get_sources();
+$metrics        = ss_get_latest_metrics();
+$last_col       = ss_last_collection();
+$visit_totals   = ss_get_visit_totals($days);
+$visit_sources  = ss_get_visit_sources();
 
 // Agrupar métricas por source
 $metrics_by_source = [];
@@ -62,15 +64,22 @@ foreach ($metrics as $m) {
     $metrics_by_source[$m['source']][] = $m;
 }
 
+// Visitas indexadas por source
+$visits_by_source = [];
+foreach ($visit_totals as $v) {
+    $visits_by_source[$v['source']] = (int)$v['total'];
+}
+
 // Para el gráfico de GitHub: datos del repo seleccionado
 $gh_repo_sel = $_GET['repo'] ?? ($gh_repos[0] ?? '');
 $gh_history  = $gh_repo_sel ? ss_get_github_history($gh_repo_sel, $days) : [];
 
-// Para el gráfico de métricas: source+metric seleccionados
-$src_sel     = $_GET['src'] ?? ($sources[0] ?? '');
-$src_metrics = $src_sel ? ss_get_source_metrics($src_sel) : [];
-$metric_sel  = $_GET['metric'] ?? ($src_metrics[0] ?? '');
-$metric_hist = ($src_sel && $metric_sel) ? ss_get_metric_history($src_sel, $metric_sel, $days) : [];
+// Para el gráfico de métricas / visitas: source seleccionado
+$src_sel      = $_GET['src'] ?? ($sources[0] ?? $visit_sources[0] ?? '');
+$src_metrics  = $src_sel ? ss_get_source_metrics($src_sel) : [];
+$metric_sel   = $_GET['metric'] ?? ($src_metrics[0] ?? '');
+$metric_hist  = ($src_sel && $metric_sel) ? ss_get_metric_history($src_sel, $metric_sel, $days) : [];
+$visit_hist   = $src_sel ? ss_get_visit_history($src_sel, $days) : [];
 
 function base_url(): string {
     $k = $_GET['key'] ?? '';
@@ -239,11 +248,36 @@ main { padding: 1.5rem; max-width: 1200px; }
     <p class="empty">Sin datos de GitHub. Ejecutá el collector para empezar.</p>
     <?php endif; ?>
 
+    <?php if ($visit_totals): ?>
+    <p class="section-title">Visitas reales (browser) — últimos <?= $days ?> días</p>
+    <table class="gh-table">
+        <thead><tr>
+            <th>Herramienta</th>
+            <th class="num">Visitas</th>
+        </tr></thead>
+        <tbody>
+        <?php foreach ($visit_totals as $v): ?>
+        <tr>
+            <td class="repo-name"><?= htmlspecialchars($v['source']) ?></td>
+            <td class="num"><?= number_format($v['total']) ?></td>
+        </tr>
+        <?php endforeach; ?>
+        </tbody>
+    </table>
+    <?php endif; ?>
+
     <?php if ($metrics_by_source): ?>
     <p class="section-title">Herramientas — último valor disponible</p>
     <?php foreach ($metrics_by_source as $src => $ms): ?>
     <div class="source-block">
-        <h3><?= htmlspecialchars($src) ?></h3>
+        <h3>
+            <?= htmlspecialchars($src) ?>
+            <?php if (isset($visits_by_source[$src])): ?>
+            <span style="font-weight:400;color:var(--text2);font-size:.8rem;margin-left:.5rem">
+                · <?= number_format($visits_by_source[$src]) ?> visitas (<?= $days ?>d)
+            </span>
+            <?php endif; ?>
+        </h3>
         <div class="grid">
         <?php foreach ($ms as $m): ?>
             <div class="card">
@@ -311,10 +345,25 @@ main { padding: 1.5rem; max-width: 1200px; }
     const mLabels = <?= json_encode(array_column($metric_hist, 'date')) ?>;
     const mValues = <?= json_encode(array_map('floatval', array_column($metric_hist, 'value'))) ?>;
     </script>
-    <?php elseif ($sources): ?>
+    <?php endif; ?>
+
+    <?php if ($visit_hist && $src_sel): ?>
+    <div class="chart-wrap" style="margin-top:1.5rem">
+        <h2><?= htmlspecialchars($src_sel) ?> — visitas reales últimos <?= $days ?> días</h2>
+        <canvas id="visit-chart" height="80"></canvas>
+    </div>
+    <script>
+    const vLabels = <?= json_encode(array_column($visit_hist, 'date')) ?>;
+    const vValues = <?= json_encode(array_map('intval', array_column($visit_hist, 'visits'))) ?>;
+    </script>
+    <?php endif; ?>
+
+    <?php if (!$metric_hist && !$visit_hist): ?>
+    <?php if ($sources || $visit_sources): ?>
     <p class="empty">Sin datos para esta selección en los últimos <?= $days ?> días.</p>
     <?php else: ?>
     <p class="empty">No hay herramientas con datos aún. Ejecutá el collector o revisá tu config.php.</p>
+    <?php endif; ?>
     <?php endif; ?>
 
 <?php elseif ($section === 'log'): ?>
@@ -378,6 +427,17 @@ if (typeof mLabels !== 'undefined') {
         data: {
             labels: mLabels,
             datasets: [{ label: metricSel, data: mValues, borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,.15)', tension: .3, fill: true }]
+        },
+        options: baseOpts
+    });
+}
+
+if (typeof vLabels !== 'undefined') {
+    new Chart(document.getElementById('visit-chart'), {
+        type: 'bar',
+        data: {
+            labels: vLabels,
+            datasets: [{ label: 'Visitas reales', data: vValues, backgroundColor: 'rgba(34,197,94,.7)', borderColor: '#22c55e', borderWidth: 1 }]
         },
         options: baseOpts
     });

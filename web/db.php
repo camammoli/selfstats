@@ -36,6 +36,14 @@ function _ss_init_schema(PDO $pdo): void {
             UNIQUE(source, metric, date)
         );
 
+        CREATE TABLE IF NOT EXISTS visits (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            source     TEXT NOT NULL,
+            date       TEXT NOT NULL,
+            visited_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_visits_source_date ON visits(source, date);
+
         CREATE TABLE IF NOT EXISTS collection_log (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             collected_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -154,6 +162,40 @@ function ss_get_log(int $limit = 50): array {
     ");
     $st->execute([$limit]);
     return $st->fetchAll();
+}
+
+// ── Visitas (beacon JS) ───────────────────────────────────────────────────────
+
+function ss_record_visit(string $source): void {
+    ss_db()->prepare("INSERT INTO visits (source, date) VALUES (?, ?)")
+        ->execute([$source, gmdate('Y-m-d')]);
+}
+
+function ss_get_visit_history(string $source, int $days = 30): array {
+    $st = ss_db()->prepare("
+        SELECT date, COUNT(*) AS visits
+        FROM visits
+        WHERE source = ? AND date >= date('now', ? || ' days')
+        GROUP BY date ORDER BY date ASC
+    ");
+    $st->execute([$source, "-$days"]);
+    return $st->fetchAll();
+}
+
+function ss_get_visit_totals(int $days = 30): array {
+    $st = ss_db()->prepare("
+        SELECT source, COUNT(*) AS total
+        FROM visits
+        WHERE date >= date('now', ? || ' days')
+        GROUP BY source ORDER BY total DESC
+    ");
+    $st->execute(["-$days"]);
+    return $st->fetchAll();
+}
+
+function ss_get_visit_sources(): array {
+    $st = ss_db()->query("SELECT DISTINCT source FROM visits ORDER BY source");
+    return $st->fetchAll(PDO::FETCH_COLUMN);
 }
 
 function ss_last_collection(): ?string {
