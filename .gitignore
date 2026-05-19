@@ -1,0 +1,4 @@
+web/config.php
+web/data/*.db
+web/data/*.db-shm
+web/data/*.db-wal
