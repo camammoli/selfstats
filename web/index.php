@@ -9,19 +9,41 @@ if (!file_exists($config_file)) {
 }
 $config = require $config_file;
 
-// Auth
-$key = $_GET['key'] ?? $_COOKIE['ss_key'] ?? '';
+// Auth — POST login → cookie → redirect limpio; GET key solo para links directos (collector cron)
+$key = '';
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $key = trim($_POST['key'] ?? '');
+} elseif (isset($_COOKIE['ss_key'])) {
+    $key = $_COOKIE['ss_key'];
+} elseif (isset($_GET['key'])) {
+    // Link directo con clave (ej: primer acceso desde Telegram)
+    // Validar y redirigir a URL limpia para que no quede en historial
+    $key = trim($_GET['key']);
+    if (hash_equals($config['admin_key'] ?? '', $key)) {
+        setcookie('ss_key', $key, time() + 86400 * 30, '/', '', true, true);
+        $qs = http_build_query(array_diff_key($_GET, ['key' => '']));
+        header('Location: ?' . $qs);
+        exit;
+    }
+}
+
 $authed = hash_equals($config['admin_key'] ?? '', $key);
 if (!$authed) {
-    http_response_code(403);
-    die('<!doctype html><html><body style="font-family:monospace;padding:2rem">
-        <h2>SelfStats</h2>
-        <form method="get">
-            <input name="key" type="password" placeholder="Clave de acceso" autofocus>
-            <button type="submit">Entrar</button>
-        </form></body></html>');
+    http_response_code(401);
+    die('<!doctype html><html><head><meta charset="utf-8"><title>SelfStats</title>
+<style>*{box-sizing:border-box}body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0f172a;color:#f1f5f9}
+form{background:#1e293b;padding:2rem;border-radius:12px;border:1px solid #334155;min-width:280px;text-align:center}
+h2{margin:0 0 1.5rem;font-size:1.1rem;letter-spacing:-.02em}span{color:#818cf8}
+input{width:100%;padding:.6rem .8rem;background:#0f172a;border:1px solid #334155;border-radius:7px;color:#f1f5f9;font-size:.95rem;margin-bottom:1rem;outline:none}
+input:focus{border-color:#818cf8}button{width:100%;padding:.6rem;background:#6366f1;color:#fff;border:none;border-radius:7px;font-size:.95rem;cursor:pointer}
+button:hover{background:#818cf8}</style></head>
+<body><form method="post">
+    <h2>Self<span>Stats</span></h2>
+    <input type="password" name="key" placeholder="Clave de acceso" autofocus>
+    <button type="submit">Entrar</button>
+</form></body></html>');
 }
-setcookie('ss_key', $key, time() + 86400 * 7, '/', '', true, true);
+setcookie('ss_key', $key, time() + 86400 * 30, '/', '', true, true);
 
 // Parámetros de vista
 $days    = max(7, min(365, (int)($_GET['days'] ?? 30)));
