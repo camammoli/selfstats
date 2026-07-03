@@ -70,6 +70,26 @@ foreach ($visit_totals as $v) {
     $visits_by_source[$v['source']] = (int)$v['total'];
 }
 
+// Notas — lectura directa del SQLite de notas
+function ss_notas_db(): ?PDO {
+    $path = dirname(dirname(__DIR__)) . '/notas/data/notas.db';
+    if (!file_exists($path)) return null;
+    $pdo = new PDO('sqlite:' . $path);
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+    $pdo->exec('PRAGMA query_only=ON;');
+    return $pdo;
+}
+
+$notas_data = null;
+if (($section === 'notas' || $section === 'overview') && ($ndb = ss_notas_db())) {
+    $notas_data = [
+        'stats'    => $ndb->query("SELECT COUNT(*) AS total, SUM(is_published) AS pub, SUM(views) AS views FROM posts")->fetch(),
+        'top'      => $ndb->query("SELECT title, slug, views, category, published_at, is_published FROM posts ORDER BY views DESC LIMIT 10")->fetchAll(),
+        'drafts'   => (int)$ndb->query("SELECT COUNT(*) FROM posts WHERE is_published=0")->fetchColumn(),
+    ];
+}
+
 // Para el gráfico de GitHub: datos del repo seleccionado
 $gh_repo_sel = $_GET['repo'] ?? ($gh_repos[0] ?? '');
 $gh_history  = $gh_repo_sel ? ss_get_github_history($gh_repo_sel, $days) : [];
@@ -167,7 +187,7 @@ main { padding: 1.5rem; max-width: 1200px; }
 
 <nav>
     <?php
-    $sections = ['overview' => 'Resumen', 'github' => 'GitHub', 'tools' => 'Herramientas', 'log' => 'Log'];
+    $sections = ['overview' => 'Resumen', 'github' => 'GitHub', 'tools' => 'Herramientas', 'notas' => 'Notas', 'log' => 'Log'];
     foreach ($sections as $slug => $label):
         $active = ($section === $slug) ? ' class="active"' : '';
         echo "<a href=\"" . base_url() . "&s=$slug&days=$days\"$active>$label</a>";
@@ -264,6 +284,24 @@ main { padding: 1.5rem; max-width: 1200px; }
         <?php endforeach; ?>
         </tbody>
     </table>
+    <?php endif; ?>
+
+    <?php if ($notas_data): ?>
+    <p class="section-title">Notas — lecturas acumuladas</p>
+    <div class="grid" style="margin-bottom:1.5rem">
+        <div class="card">
+            <div class="label">Lecturas totales</div>
+            <div class="value"><?= number_format($notas_data['stats']['views'] ?? 0) ?></div>
+            <div class="sub"><?= $notas_data['stats']['pub'] ?> publicadas · <?= $notas_data['drafts'] ?> borradores</div>
+        </div>
+        <?php if ($notas_data['top'][0] ?? null): $top = $notas_data['top'][0]; ?>
+        <div class="card">
+            <div class="label">Nota más leída</div>
+            <div class="value" style="font-size:1.1rem;line-height:1.3"><?= htmlspecialchars(mb_substr($top['title'], 0, 40)) ?><?= mb_strlen($top['title']) > 40 ? '…' : '' ?></div>
+            <div class="sub"><?= number_format($top['views']) ?> lecturas</div>
+        </div>
+        <?php endif; ?>
+    </div>
     <?php endif; ?>
 
     <?php if ($metrics_by_source): ?>
@@ -364,6 +402,78 @@ main { padding: 1.5rem; max-width: 1200px; }
     <?php else: ?>
     <p class="empty">No hay herramientas con datos aún. Ejecutá el collector o revisá tu config.php.</p>
     <?php endif; ?>
+    <?php endif; ?>
+
+<?php elseif ($section === 'notas'): ?>
+
+    <?php if (!$notas_data): ?>
+    <p class="empty">No se pudo conectar al DB de notas. Verificá que el archivo exista en el servidor.</p>
+    <?php else:
+        $ns = $notas_data['stats'];
+        $top_post = $notas_data['top'][0] ?? null;
+        $total_views = (int)($ns['views'] ?? 0);
+        $pub_count   = (int)($ns['pub'] ?? 0);
+        $avg_views   = $pub_count > 0 ? round($total_views / $pub_count) : 0;
+    ?>
+
+    <div class="grid" style="margin-bottom:1.5rem">
+        <div class="card">
+            <div class="label">Lecturas totales</div>
+            <div class="value"><?= number_format($total_views) ?></div>
+            <div class="sub">todas las notas publicadas</div>
+        </div>
+        <div class="card">
+            <div class="label">Publicadas</div>
+            <div class="value"><?= $pub_count ?></div>
+            <div class="sub"><?= $notas_data['drafts'] ?> borradores</div>
+        </div>
+        <div class="card">
+            <div class="label">Promedio / nota</div>
+            <div class="value"><?= number_format($avg_views) ?></div>
+            <div class="sub">lecturas</div>
+        </div>
+        <?php if ($top_post): ?>
+        <div class="card">
+            <div class="label">Más leída</div>
+            <div class="value" style="font-size:1rem;line-height:1.35"><?= htmlspecialchars(mb_substr($top_post['title'], 0, 35)) ?><?= mb_strlen($top_post['title']) > 35 ? '…' : '' ?></div>
+            <div class="sub"><?= number_format($top_post['views']) ?> lecturas</div>
+        </div>
+        <?php endif; ?>
+    </div>
+
+    <div class="chart-wrap">
+        <h2>Ranking de lecturas</h2>
+        <table class="gh-table" style="margin-bottom:0">
+            <thead><tr>
+                <th>#</th>
+                <th>Nota</th>
+                <th>Categoría</th>
+                <th class="num">Lecturas</th>
+                <th>Estado</th>
+                <th>Publicada</th>
+            </tr></thead>
+            <tbody>
+            <?php foreach ($notas_data['top'] as $i => $p):
+                $cats = array_filter(array_map('trim', explode(',', $p['category'])));
+            ?>
+            <tr>
+                <td style="color:var(--text2);font-size:.8rem"><?= $i + 1 ?></td>
+                <td class="repo-name">
+                    <a href="/notas/<?= htmlspecialchars($p['slug']) ?>" target="_blank"
+                       style="color:var(--accent);text-decoration:none">
+                        <?= htmlspecialchars(mb_substr($p['title'], 0, 60)) ?><?= mb_strlen($p['title']) > 60 ? '…' : '' ?>
+                    </a>
+                </td>
+                <td style="font-size:.75rem;color:var(--text2)"><?= htmlspecialchars(implode(', ', $cats)) ?></td>
+                <td class="num" style="font-weight:700"><?= number_format($p['views']) ?></td>
+                <td style="font-size:.8rem"><?= $p['is_published'] ? '<span style="color:var(--ok)">✓ pub</span>' : '<span style="color:var(--warn)">borrador</span>' ?></td>
+                <td style="font-size:.8rem;color:var(--text2)"><?= substr($p['published_at'], 0, 10) ?></td>
+            </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+
     <?php endif; ?>
 
 <?php elseif ($section === 'log'): ?>

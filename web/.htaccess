@@ -1,0 +1,5 @@
+# Proteger config.php y data/
+<Files "config.php">
+    Order deny,allow
+    Deny from all
+</Files>
