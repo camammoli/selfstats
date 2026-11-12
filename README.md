@@ -1,5 +1,7 @@
 # SelfStats
 
+[![Archivado en Software Heritage](https://archive.softwareheritage.org/badge/origin/https://github.com/camammoli/selfstats/)](https://archive.softwareheritage.org/browse/origin/?origin_url=https://github.com/camammoli/selfstats)
+
 Track GitHub repo traffic and real usage of your self-hosted tools — all in one dashboard.
 
 **Self-hostable · PHP 8 · SQLite · No framework · No tracking**
